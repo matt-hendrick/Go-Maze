@@ -15,16 +15,19 @@
     </style>
   </head>
   <body>
-    <div id="maze">{{.}}</div>
+    <div id="maze">{{.HTML}}</div>
     <script>
-      let x = 0;
-      function colorCell(y, x) {
-        if (x > 39) return;
+      let idx = 0;
+      let pathToEnd = {{.Path}}
+      function colorCell(idx) {
+        if (idx >= pathToEnd.length) return;
+        console.log(idx, {{.Path}}[idx], {{.Path}})
+        let [y,x] = pathToEnd[idx].split(",")
         let elem = document.getElementById(`${y}, ${x}`);
         elem.style.backgroundColor = 'blue';
-        console.log('RAN', y, x, elem);
+        console.log('RAN', idx, elem);
       }
-      setInterval(() => colorCell(0, x++), 1000);
+      setInterval(() => colorCell(idx++), 100);
     </script>
   </body>
 </html>
