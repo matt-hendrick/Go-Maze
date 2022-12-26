@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"log"
+	"math/rand"
 	"net/http"
 	"time"
 )
@@ -20,12 +21,19 @@ type Point struct {
 	y int
 }
 
+func NewPoint(y, x int) Point {
+	point := Point{}
+	point.y = y
+	point.x = x
+	return point
+}
+
 func (point *Point) ToString() string {
 	return fmt.Sprintf("%d,%d", point.y, point.x)
 }
 
 type Maze struct {
-	matrix       [][]uint8
+	matrix       [][]bool
 	visitedStack Stack
 	visitedSet   Set
 	start        Point
@@ -89,16 +97,17 @@ func (stack *Stack) Print() {
 }
 
 func main() {
+	rand.Seed(time.Now().UnixNano())
 	start := time.Now()
 
-	var mazeToRun Maze = generateMaze(40, 40)
-	var completedMaze Maze = DFS(mazeToRun)
+	var mazeToRun *Maze = generateMaze(40)
+	var completedMaze *Maze = DFS(mazeToRun)
 
 	duration := time.Since(start)
 	fmt.Println(duration.String())
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if err := mapTemplate.Execute(w, getHTML(completedMaze)); err != nil {
+		if err := mapTemplate.Execute(w, getData(completedMaze)); err != nil {
 			log.Fatal(err)
 		}
 	})
@@ -109,24 +118,49 @@ func main() {
 	}
 }
 
-func generateMaze(height, width int) Maze {
-	if height < 5 || width < 5 {
-		panic("Maze too small for current implementation")
-	}
+func generateMaze(size int) *Maze {
 	var maze Maze
-	maze.matrix = make([][]uint8, height)
+	maze.matrix = make([][]bool, size)
 	for row := range maze.matrix {
-		maze.matrix[row] = make([]uint8, width)
+		maze.matrix[row] = make([]bool, size)
 	}
 	maze.visitedSet = *NewSet()
-	maze.start.x = 0
-	maze.start.y = 0
-	maze.end.x = 20
-	maze.end.y = 13
-	return maze
+	maze.start.x = rand.Intn(size)
+	maze.start.y = rand.Intn(size)
+	maze.end.x = rand.Intn(size)
+	maze.end.y = rand.Intn(size)
+	addObstacles(&maze)
+	//fmt.Printf("%d, %d, %d, %d \n", maze.start.x, maze.start.y, maze.end.x, maze.end.y)
+	return &maze
 }
 
-func DFS(maze Maze) Maze {
+func addObstacles(maze *Maze) {
+	for iY, row := range maze.matrix {
+		for iX, _ := range row {
+			// don't put an obstacle on the starting or ending cells
+			if (iY == maze.start.y && iX == maze.start.x) || (iY == maze.end.y && iX == maze.end.x) {
+				continue
+			} else if rand.Intn(10) < 3 {
+				maze.matrix[iY][iX] = true
+			}
+		}
+	}
+}
+
+func canVisit(point *Point, maze *Maze) bool {
+	if point.x < 0 || point.y < 0 || point.y >= len(maze.matrix) || point.x >= len(maze.matrix[point.y]) {
+		return false
+	}
+	if maze.visitedSet.Contains(*point) {
+		return false
+	}
+	if maze.matrix[point.y][point.x] {
+		return false
+	}
+	return true
+}
+
+func DFS(maze *Maze) *Maze {
 	maze.visitedStack.Push(maze.start)
 	count := 0
 	for len(maze.visitedStack) > 0 {
@@ -135,6 +169,7 @@ func DFS(maze Maze) Maze {
 		fmt.Printf("Current point is: %s \n", currPointString)
 		if currPoint == maze.end {
 			// check end
+			maze.pathToEnd = append(maze.pathToEnd, currPointString)
 			fmt.Println("Reached the endpoint!")
 			break
 		} else if maze.visitedSet.Contains(currPoint) {
@@ -142,29 +177,29 @@ func DFS(maze Maze) Maze {
 			fmt.Printf(currPointString + " already visited!")
 		} else {
 			// check next
-			// right cell is valid
-			rightNeighbor := Point{currPoint.y, currPoint.x + 1}
-			if currPoint.x+1 < len(maze.matrix) && !maze.visitedSet.Contains(rightNeighbor) {
-				maze.visitedStack.Push(rightNeighbor)
-				fmt.Printf("R - new X = %d \n", currPoint.x+1)
+			// top cell is valid
+			topNeighbor := NewPoint(currPoint.y-1, currPoint.x)
+			if canVisit(&topNeighbor, maze) {
+				maze.visitedStack.Push(topNeighbor)
+				//fmt.Printf("T - new Point = %d, %d \n", currPoint.y-1, currPoint.x)
 			}
 			// left cell is valid
-			leftNeighbor := Point{currPoint.y, currPoint.x - 1}
-			if currPoint.x-1 >= 0 && !maze.visitedSet.Contains(leftNeighbor) {
+			leftNeighbor := NewPoint(currPoint.y, currPoint.x-1)
+			if canVisit(&leftNeighbor, maze) {
 				maze.visitedStack.Push(leftNeighbor)
-				fmt.Printf("L - new X = %d \n", currPoint.x+1)
-			}
-			// top cell is valid
-			topNeighbor := Point{currPoint.y - 1, currPoint.x}
-			if currPoint.y-1 >= 0 && !maze.visitedSet.Contains(topNeighbor) {
-				maze.visitedStack.Push(topNeighbor)
-				fmt.Printf("T - new Y = %d \n", currPoint.x+1)
+				//fmt.Printf("L - new Point = %d, %d \n", currPoint.y, currPoint.x-1)
 			}
 			// bottom cell is valid
-			bottomNeighbor := Point{currPoint.y + 1, currPoint.x}
-			if currPoint.y+1 < len(maze.matrix) && !maze.visitedSet.Contains(bottomNeighbor) {
+			bottomNeighbor := NewPoint(currPoint.y+1, currPoint.x)
+			if canVisit(&bottomNeighbor, maze) {
 				maze.visitedStack.Push(bottomNeighbor)
-				fmt.Printf("B - new Y = %d \n", currPoint.y+1)
+				//fmt.Printf("B - new Point = %d, %d \n", currPoint.y+1, currPoint.x)
+			}
+			// right cell is valid
+			rightNeighbor := NewPoint(currPoint.y, currPoint.x+1)
+			if canVisit(&rightNeighbor, maze) {
+				maze.visitedStack.Push(rightNeighbor)
+				//fmt.Printf("R - new Point = %d, %d \n", currPoint.y, currPoint.x+1)
 			}
 			maze.visitedSet.Add(currPoint)
 			maze.pathToEnd = append(maze.pathToEnd, currPointString)
@@ -180,30 +215,32 @@ func BFS() {
 	return
 }
 
-// gets HTML to inject into main.html
-func getHTML(maze Maze) JSData {
+// gets data to inject into main.html
+func getData(maze *Maze) JSData {
 
 	var data JSData
 	var html template.HTML = ""
 
 	for iY, y := range maze.matrix {
 		for iX, _ := range y {
+			// add opening div for row
 			if iX == 0 {
-				fmt.Println("add beginning of row", iX)
 				html += "<div class=row>"
 			}
 
-			fmt.Println("add cell", iX)
+			// add divs for cells
 			if iY == maze.start.y && iX == maze.start.x {
-				html += template.HTML(fmt.Sprintf("<div class='cell' style='background-color:gold' id='%d, %d'></div>", iY, iX))
+				html += template.HTML(fmt.Sprintf("<div class='cell' style='background-color:gold' id='%d,%d'></div>", iY, iX))
 			} else if iY == maze.end.y && iX == maze.end.x {
-				html += template.HTML(fmt.Sprintf("<div class='cell' style='background-color:red' id='%d, %d'></div>", iY, iX))
+				html += template.HTML(fmt.Sprintf("<div class='cell' style='background-color:red' id='%d,%d'></div>", iY, iX))
+			} else if maze.matrix[iY][iX] {
+				html += template.HTML(fmt.Sprintf("<div class='cell' style='background-color:black' id='%d,%d'></div>", iY, iX))
 			} else {
-				html += template.HTML(fmt.Sprintf("<div class='cell' id='%d, %d'></div>", iY, iX))
+				html += template.HTML(fmt.Sprintf("<div class='cell' id='%d,%d'></div>", iY, iX))
 			}
 
+			// add closing div for row
 			if iX+1 >= len(y) {
-				fmt.Println("add closing of row", iX, iY)
 				html += "</div>"
 			}
 		}

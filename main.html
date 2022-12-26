@@ -19,15 +19,13 @@
     <script>
       let idx = 0;
       let pathToEnd = {{.Path}}
+      console.log(pathToEnd)
       function colorCell(idx) {
         if (idx >= pathToEnd.length) return;
-        console.log(idx, {{.Path}}[idx], {{.Path}})
-        let [y,x] = pathToEnd[idx].split(",")
-        let elem = document.getElementById(`${y}, ${x}`);
+        let elem = document.getElementById(pathToEnd[idx]);
         elem.style.backgroundColor = 'blue';
-        console.log('RAN', idx, elem);
       }
-      setInterval(() => colorCell(idx++), 100);
+      setInterval(() => colorCell(idx++), 50);
     </script>
   </body>
 </html>
