@@ -1,8 +1,17 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Maze Test</title>
+    <title>Go-Generated Maze</title>
     <style>
+      .container {
+        display: flex;
+      }
+      .justify-center {
+        justify-content: center;
+      }
+      .justify-space-evenly {
+        justify-content: space-evenly;
+      }
       .row {
         display: flex;
         flex-wrap: wrap;
@@ -12,10 +21,29 @@
         height: 20px;
         border: 1px solid black;
       }
+      a.button {
+        -webkit-appearance: button;
+        -moz-appearance: button;
+        appearance: button;
+
+        text-decoration: none;
+        background: #4e9caf;
+        padding: 5px;
+        text-align: center;
+        border-radius: 5px;
+        color: white;
+        font-weight: bold;
+      }
     </style>
   </head>
   <body>
-    <div id="maze">{{.HTML}}</div>
+    <div class="container justify-space-evenly">
+      <a href="/DFS" class="button">Solve a random maze with DFS</a>
+      <a href="/BFS" class="button">Solve a random maze with BFS</a>
+    </div>
+    <div class="container justify-center">
+      <div id="maze">{{.HTML}}</div>
+    </div>
     <script>
       let idx = 0;
       let pathToEnd = {{.Path}}
@@ -25,7 +53,7 @@
         let elem = document.getElementById(pathToEnd[idx]);
         elem.style.backgroundColor = 'blue';
       }
-      setInterval(() => colorCell(idx++), 50);
+      setInterval(() => colorCell(idx++), 10);
     </script>
   </body>
 </html>

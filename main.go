@@ -1,6 +1,7 @@
 package main
 
 import (
+	"container/list"
 	_ "embed"
 	"fmt"
 	"html/template"
@@ -34,11 +35,40 @@ func (point *Point) ToString() string {
 
 type Maze struct {
 	matrix       [][]bool
-	visitedStack Stack
+	queueToVisit *list.List
+	stackToVisit Stack
 	visitedSet   Set
 	start        Point
 	end          Point
 	pathToEnd    []string
+}
+
+func NewMaze(size int) *Maze {
+	var maze Maze
+	maze.matrix = make([][]bool, size)
+	for row := range maze.matrix {
+		maze.matrix[row] = make([]bool, size)
+	}
+	maze.visitedSet = *NewSet()
+	maze.start.x = rand.Intn(size)
+	maze.start.y = rand.Intn(size)
+	maze.end.x = rand.Intn(size)
+	maze.end.y = rand.Intn(size)
+	addObstacles(&maze)
+	return &maze
+}
+
+func addObstacles(maze *Maze) {
+	for iY, row := range maze.matrix {
+		for iX, _ := range row {
+			// don't put an obstacle on the starting or ending cells
+			if (iY == maze.start.y && iX == maze.start.x) || (iY == maze.end.y && iX == maze.end.x) {
+				continue
+			} else if rand.Intn(10) < 3 {
+				maze.matrix[iY][iX] = true
+			}
+		}
+	}
 }
 
 type JSData struct {
@@ -97,20 +127,12 @@ func (stack *Stack) Print() {
 }
 
 func main() {
-	rand.Seed(time.Now().UnixNano())
-	start := time.Now()
 
-	var mazeToRun *Maze = generateMaze(40)
-	var completedMaze *Maze = DFS(mazeToRun)
+	http.HandleFunc("/DFS", dfsHandler)
 
-	duration := time.Since(start)
-	fmt.Println(duration.String())
+	http.HandleFunc("/BFS", bfsHandler)
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if err := mapTemplate.Execute(w, getData(completedMaze)); err != nil {
-			log.Fatal(err)
-		}
-	})
+	http.HandleFunc("/", dfsHandler)
 
 	fmt.Printf("Starting server at port 8080\n")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
@@ -118,106 +140,21 @@ func main() {
 	}
 }
 
-func generateMaze(size int) *Maze {
-	var maze Maze
-	maze.matrix = make([][]bool, size)
-	for row := range maze.matrix {
-		maze.matrix[row] = make([]bool, size)
-	}
-	maze.visitedSet = *NewSet()
-	maze.start.x = rand.Intn(size)
-	maze.start.y = rand.Intn(size)
-	maze.end.x = rand.Intn(size)
-	maze.end.y = rand.Intn(size)
-	addObstacles(&maze)
-	//fmt.Printf("%d, %d, %d, %d \n", maze.start.x, maze.start.y, maze.end.x, maze.end.y)
-	return &maze
-}
-
-func addObstacles(maze *Maze) {
-	for iY, row := range maze.matrix {
-		for iX, _ := range row {
-			// don't put an obstacle on the starting or ending cells
-			if (iY == maze.start.y && iX == maze.start.x) || (iY == maze.end.y && iX == maze.end.x) {
-				continue
-			} else if rand.Intn(10) < 3 {
-				maze.matrix[iY][iX] = true
-			}
-		}
+func dfsHandler(w http.ResponseWriter, r *http.Request) {
+	if err := mapTemplate.Execute(w, getData("DFS")); err != nil {
+		log.Fatal(err)
 	}
 }
 
-func canVisit(point *Point, maze *Maze) bool {
-	if point.x < 0 || point.y < 0 || point.y >= len(maze.matrix) || point.x >= len(maze.matrix[point.y]) {
-		return false
+func bfsHandler(w http.ResponseWriter, r *http.Request) {
+	if err := mapTemplate.Execute(w, getData("BFS")); err != nil {
+		log.Fatal(err)
 	}
-	if maze.visitedSet.Contains(*point) {
-		return false
-	}
-	if maze.matrix[point.y][point.x] {
-		return false
-	}
-	return true
-}
-
-func DFS(maze *Maze) *Maze {
-	maze.visitedStack.Push(maze.start)
-	count := 0
-	for len(maze.visitedStack) > 0 {
-		currPoint, _ := maze.visitedStack.Pop()
-		currPointString := currPoint.ToString()
-		fmt.Printf("Current point is: %s \n", currPointString)
-		if currPoint == maze.end {
-			// check end
-			maze.pathToEnd = append(maze.pathToEnd, currPointString)
-			fmt.Println("Reached the endpoint!")
-			break
-		} else if maze.visitedSet.Contains(currPoint) {
-			// check visited
-			fmt.Printf(currPointString + " already visited!")
-		} else {
-			// check next
-			// top cell is valid
-			topNeighbor := NewPoint(currPoint.y-1, currPoint.x)
-			if canVisit(&topNeighbor, maze) {
-				maze.visitedStack.Push(topNeighbor)
-				//fmt.Printf("T - new Point = %d, %d \n", currPoint.y-1, currPoint.x)
-			}
-			// left cell is valid
-			leftNeighbor := NewPoint(currPoint.y, currPoint.x-1)
-			if canVisit(&leftNeighbor, maze) {
-				maze.visitedStack.Push(leftNeighbor)
-				//fmt.Printf("L - new Point = %d, %d \n", currPoint.y, currPoint.x-1)
-			}
-			// bottom cell is valid
-			bottomNeighbor := NewPoint(currPoint.y+1, currPoint.x)
-			if canVisit(&bottomNeighbor, maze) {
-				maze.visitedStack.Push(bottomNeighbor)
-				//fmt.Printf("B - new Point = %d, %d \n", currPoint.y+1, currPoint.x)
-			}
-			// right cell is valid
-			rightNeighbor := NewPoint(currPoint.y, currPoint.x+1)
-			if canVisit(&rightNeighbor, maze) {
-				maze.visitedStack.Push(rightNeighbor)
-				//fmt.Printf("R - new Point = %d, %d \n", currPoint.y, currPoint.x+1)
-			}
-			maze.visitedSet.Add(currPoint)
-			maze.pathToEnd = append(maze.pathToEnd, currPointString)
-			count++
-			fmt.Printf("Iteration # %d \n", count)
-			//maze.visitedStack.Print()
-		}
-	}
-	return maze
-}
-
-func BFS() {
-	return
 }
 
 // gets data to inject into main.html
-func getData(maze *Maze) JSData {
-
+func getData(algoToUse string) JSData {
+	var maze *Maze = createAndSolveMaze(algoToUse)
 	var data JSData
 	var html template.HTML = ""
 
@@ -249,4 +186,138 @@ func getData(maze *Maze) JSData {
 	data.HTML = html
 	data.Path = maze.pathToEnd
 	return data
+}
+
+func createAndSolveMaze(algoToUse string) *Maze {
+	rand.Seed(time.Now().UnixNano())
+	start := time.Now()
+
+	var maze *Maze = NewMaze(40)
+	if algoToUse == "DFS" {
+		maze = DFS(maze)
+	} else {
+		maze = BFS(maze)
+	}
+
+	duration := time.Since(start)
+	fmt.Println(duration.String())
+	return maze
+}
+
+func canVisit(point *Point, maze *Maze) bool {
+	if point.x < 0 || point.y < 0 || point.y >= len(maze.matrix) || point.x >= len(maze.matrix[point.y]) {
+		return false
+	}
+	if maze.visitedSet.Contains(*point) {
+		return false
+	}
+	// if is obstacle
+	if maze.matrix[point.y][point.x] {
+		return false
+	}
+	return true
+}
+
+func DFS(maze *Maze) *Maze {
+	maze.stackToVisit.Push(maze.start)
+	count := 0
+	for len(maze.stackToVisit) > 0 {
+		currPoint, _ := maze.stackToVisit.Pop()
+		currPointString := currPoint.ToString()
+		fmt.Printf("Current point is: %s \n", currPointString)
+		if currPoint == maze.end {
+			// check end
+			maze.pathToEnd = append(maze.pathToEnd, currPointString)
+			fmt.Println("Reached the endpoint!")
+			break
+		} else if maze.visitedSet.Contains(currPoint) {
+			// check visited
+			fmt.Printf(currPointString + " already visited!")
+		} else {
+			// check neighbors
+			// check top cell
+			topNeighbor := NewPoint(currPoint.y-1, currPoint.x)
+			if canVisit(&topNeighbor, maze) {
+				maze.stackToVisit.Push(topNeighbor)
+				//fmt.Printf("T - new Point = %d, %d \n", currPoint.y-1, currPoint.x)
+			}
+			// check left cell
+			leftNeighbor := NewPoint(currPoint.y, currPoint.x-1)
+			if canVisit(&leftNeighbor, maze) {
+				maze.stackToVisit.Push(leftNeighbor)
+				//fmt.Printf("L - new Point = %d, %d \n", currPoint.y, currPoint.x-1)
+			}
+			// check bottom cell
+			bottomNeighbor := NewPoint(currPoint.y+1, currPoint.x)
+			if canVisit(&bottomNeighbor, maze) {
+				maze.stackToVisit.Push(bottomNeighbor)
+				//fmt.Printf("B - new Point = %d, %d \n", currPoint.y+1, currPoint.x)
+			}
+			// check right cell
+			rightNeighbor := NewPoint(currPoint.y, currPoint.x+1)
+			if canVisit(&rightNeighbor, maze) {
+				maze.stackToVisit.Push(rightNeighbor)
+				//fmt.Printf("R - new Point = %d, %d \n", currPoint.y, currPoint.x+1)
+			}
+			maze.visitedSet.Add(currPoint)
+			maze.pathToEnd = append(maze.pathToEnd, currPointString)
+			count++
+			fmt.Printf("Iteration # %d \n", count)
+		}
+	}
+	return maze
+}
+
+func BFS(maze *Maze) *Maze {
+	maze.queueToVisit = list.New()
+	maze.queueToVisit.PushBack(maze.start)
+	count := 0
+	for maze.queueToVisit.Len() > 0 {
+		front := maze.queueToVisit.Front()
+		currPoint := front.Value.(Point)
+		maze.queueToVisit.Remove(front)
+		currPointString := currPoint.ToString()
+		fmt.Printf("Current point is: %s \n", currPointString)
+		if currPoint == maze.end {
+			// check end
+			maze.pathToEnd = append(maze.pathToEnd, currPointString)
+			fmt.Println("Reached the endpoint!")
+			break
+		} else if maze.visitedSet.Contains(currPoint) {
+			// check visited
+			fmt.Printf(currPointString + " already visited!")
+		} else {
+			// check neighbors
+			// check top cell
+			topNeighbor := NewPoint(currPoint.y-1, currPoint.x)
+			if canVisit(&topNeighbor, maze) {
+				maze.queueToVisit.PushBack(topNeighbor)
+				//fmt.Printf("T - new Point = %d, %d \n", currPoint.y-1, currPoint.x)
+			}
+			// check left cell
+			leftNeighbor := NewPoint(currPoint.y, currPoint.x-1)
+			if canVisit(&leftNeighbor, maze) {
+				maze.queueToVisit.PushBack(leftNeighbor)
+				//fmt.Printf("L - new Point = %d, %d \n", currPoint.y, currPoint.x-1)
+			}
+			// check bottom cell
+			bottomNeighbor := NewPoint(currPoint.y+1, currPoint.x)
+			if canVisit(&bottomNeighbor, maze) {
+				maze.queueToVisit.PushBack(bottomNeighbor)
+				//fmt.Printf("B - new Point = %d, %d \n", currPoint.y+1, currPoint.x)
+			}
+			// check right cell
+			rightNeighbor := NewPoint(currPoint.y, currPoint.x+1)
+			if canVisit(&rightNeighbor, maze) {
+				maze.queueToVisit.PushBack(rightNeighbor)
+				//fmt.Printf("R - new Point = %d, %d \n", currPoint.y, currPoint.x+1)
+			}
+			maze.visitedSet.Add(currPoint)
+			maze.pathToEnd = append(maze.pathToEnd, currPointString)
+			count++
+			fmt.Printf("Iteration # %d \n", count)
+		}
+	}
+
+	return maze
 }
