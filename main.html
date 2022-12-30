@@ -17,15 +17,17 @@
         flex-wrap: wrap;
       }
       .cell {
-        width: 20px;
-        height: 20px;
+        width: 10px;
+        height: 10px;
         border: 1px solid black;
+      }
+      .text-center {
+        text-align: center;
       }
       a.button {
         -webkit-appearance: button;
         -moz-appearance: button;
         appearance: button;
-
         text-decoration: none;
         background: #4e9caf;
         padding: 5px;
@@ -38,23 +40,42 @@
   </head>
   <body>
     <div class="container justify-space-evenly">
-      <a href="/DFS" class="button">Solve a random maze with DFS</a>
-      <a href="/BFS" class="button">Solve a random maze with BFS</a>
-      <a href="/AStar" class="button">Solve a random maze with A*</a>
-    </div>
-    <div class="container justify-center">
-      <div id="maze">{{.HTML}}</div>
+      <div>
+        <h3 class="text-center">Maze solved with BFS</h3>
+        <div class="container justify-center">
+          <div id="maze">{{.BFS.HTML}}</div>
+        </div>
+      </div>
+      <div>
+        <h3 class="text-center">Maze solved with A*</h3>
+        <div class="container justify-center">
+          <div id="maze">{{.AStar.HTML}}</div>
+        </div>
+      </div>
+      <div>
+        <h3 class="text-center">Maze solved with DFS</h3>
+        <div class="container justify-center">
+          <div id="maze">{{.DFS.HTML}}</div>
+        </div>
+      </div>
     </div>
     <script>
-      let idx = 0;
-      let pathToEnd = {{.Path}}
-      console.log(pathToEnd)
-      function colorCell(idx) {
-        if (idx >= pathToEnd.length) return;
-        let elem = document.getElementById(pathToEnd[idx]);
-        elem.style.backgroundColor = 'blue';
+      let iteration = 0;
+      let bfsPath = {{.BFS.Path}}
+      let aStarPath = {{.AStar.Path}}
+      let dfsPath = {{.DFS.Path}}
+      function colorCell(iteration, pathArray) {
+        if (iteration < pathArray.length) {
+          let elem = document.getElementById(pathArray[iteration]);
+          elem.style.backgroundColor = 'blue';
+        }
       }
-      setInterval(() => colorCell(idx++), 10);
+      function performIteration(iteration) {
+        colorCell(iteration, aStarPath)
+        colorCell(iteration, dfsPath)
+        colorCell(iteration, bfsPath)
+      }
+      setInterval(() => performIteration(iteration++), 10);
     </script>
   </body>
 </html>

@@ -10,7 +10,6 @@ import (
 	"math/rand"
 	"net/http"
 	"sort"
-	"time"
 )
 
 var (
@@ -95,7 +94,13 @@ func addObstacles(maze *Maze, y int, x int) {
 	}
 }
 
-type JSData struct {
+type DataToInject struct {
+	BFS   MazeHTMLAndPath
+	DFS   MazeHTMLAndPath
+	AStar MazeHTMLAndPath
+}
+
+type MazeHTMLAndPath struct {
 	HTML template.HTML
 	Path []string
 }
@@ -123,6 +128,11 @@ func (set *Set) Contains(value string) bool {
 	return exists
 }
 
+func (set *Set) Clear() {
+	*set = Set{}
+	set.hashmap = make(map[string]struct{})
+}
+
 type Stack []Node
 
 func (stack *Stack) IsEmpty() bool {
@@ -144,6 +154,10 @@ func (stack *Stack) Pop() (Node, bool) {
 	}
 }
 
+func (stack *Stack) Clear() {
+	*stack = (*stack)[:0]
+}
+
 func (stack *Stack) Print(endNode *Node) {
 	for idx, cell := range *stack {
 		fmt.Printf("%d #: %s, distance = %f\n", idx, cell.ToString(), calculateDistance(&cell, endNode))
@@ -151,14 +165,7 @@ func (stack *Stack) Print(endNode *Node) {
 }
 
 func main() {
-
-	http.HandleFunc("/DFS", dfsHandler)
-
-	http.HandleFunc("/BFS", bfsHandler)
-
-	http.HandleFunc("/AStar", aStarHandler)
-
-	http.HandleFunc("/", aStarHandler)
+	http.HandleFunc("/", httpHandler)
 
 	fmt.Printf("Starting server at port 8080\n")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
@@ -166,79 +173,85 @@ func main() {
 	}
 }
 
-func dfsHandler(w http.ResponseWriter, r *http.Request) {
-	if err := mapTemplate.Execute(w, getData("DFS")); err != nil {
-		log.Fatal(err)
-	}
-}
-
-func bfsHandler(w http.ResponseWriter, r *http.Request) {
-	if err := mapTemplate.Execute(w, getData("BFS")); err != nil {
-		log.Fatal(err)
-	}
-}
-
-func aStarHandler(w http.ResponseWriter, r *http.Request) {
-	if err := mapTemplate.Execute(w, getData("AStar")); err != nil {
+func httpHandler(w http.ResponseWriter, r *http.Request) {
+	if err := mapTemplate.Execute(w, getData()); err != nil {
 		log.Fatal(err)
 	}
 }
 
 // gets data to inject into main.html
-func getData(algoToUse string) JSData {
-	var maze *Maze = createAndSolveMaze(algoToUse)
-	var data JSData
-	var html template.HTML = ""
+func getData() DataToInject {
+	var maze *Maze = NewMaze(40)
 
-	for iY, y := range maze.matrix {
-		for iX, _ := range y {
-			// add opening div for row
-			if iX == 0 {
-				html += "<div class=row>"
-			}
-
-			// add divs for cells
-			if iY == maze.start.y && iX == maze.start.x {
-				html += template.HTML(fmt.Sprintf("<div class='cell' style='background-color:gold' id='%d,%d'></div>", iY, iX))
-			} else if iY == maze.end.y && iX == maze.end.x {
-				html += template.HTML(fmt.Sprintf("<div class='cell' style='background-color:red' id='%d,%d'></div>", iY, iX))
-			} else if maze.matrix[iY][iX].obstacle {
-				html += template.HTML(fmt.Sprintf("<div class='cell' style='background-color:black' id='%d,%d'></div>", iY, iX))
-			} else {
-				html += template.HTML(fmt.Sprintf("<div class='cell' id='%d,%d'></div>", iY, iX))
-			}
-
-			// add closing div for row
-			if iX+1 >= len(y) {
-				html += "</div>"
-			}
-		}
-	}
-
-	data.HTML = html
-	data.Path = maze.pathToEnd
+	var data DataToInject = getDataForEachAlgoType(maze)
 	return data
 }
 
-func createAndSolveMaze(algoToUse string) *Maze {
-	rand.Seed(time.Now().UnixNano())
-	start := time.Now()
+func getDataForEachAlgoType(maze *Maze) DataToInject {
+	algos := [3]string{"DFS", "BFS", "AStar"}
+	var data DataToInject
 
-	fmt.Println("ALGO TO USE " + algoToUse)
+	for _, algoToUse := range algos {
+		clearMazeState(maze)
+		solveMaze(maze, algoToUse)
+		var mazeHtmlAndPath MazeHTMLAndPath
 
-	var maze *Maze = NewMaze(40)
-	if algoToUse == "DFS" {
-		maze = DFS(maze)
-	} else if algoToUse == "AStar" {
+		for iY, y := range maze.matrix {
+			for iX, _ := range y {
+				// add opening div for row
+				if iX == 0 {
+					mazeHtmlAndPath.HTML += "<div class=row>"
+				}
 
-		maze = AStar(maze)
-	} else {
-		maze = BFS(maze)
+				// add divs for cells
+				if iY == maze.start.y && iX == maze.start.x {
+					mazeHtmlAndPath.HTML += template.HTML(fmt.Sprintf("<div class='cell' style='background-color:gold' id='%d,%d-%s'></div>", iY, iX, algoToUse))
+				} else if iY == maze.end.y && iX == maze.end.x {
+					mazeHtmlAndPath.HTML += template.HTML(fmt.Sprintf("<div class='cell' style='background-color:red' id='%d,%d-%s'></div>", iY, iX, algoToUse))
+				} else if maze.matrix[iY][iX].obstacle {
+					mazeHtmlAndPath.HTML += template.HTML(fmt.Sprintf("<div class='cell' style='background-color:black' id='%d,%d-%s'></div>", iY, iX, algoToUse))
+				} else {
+					mazeHtmlAndPath.HTML += template.HTML(fmt.Sprintf("<div class='cell' id='%d,%d-%s'></div>", iY, iX, algoToUse))
+				}
+
+				// add closing div for row
+				if iX+1 >= len(y) {
+					mazeHtmlAndPath.HTML += "</div>"
+				}
+			}
+		}
+
+		mazeHtmlAndPath.Path = maze.pathToEnd
+		if algoToUse == "DFS" {
+			data.DFS = mazeHtmlAndPath
+		} else if algoToUse == "BFS" {
+			data.BFS = mazeHtmlAndPath
+		} else {
+			data.AStar = mazeHtmlAndPath
+		}
 	}
 
-	duration := time.Since(start)
-	fmt.Println(duration.String())
-	return maze
+	return data
+}
+
+func clearMazeState(maze *Maze) {
+	maze.stackToVisit.Clear()
+	if maze.queueToVisit != nil {
+		maze.queueToVisit.Init()
+	}
+	maze.visitedSet.Clear()
+	maze.pathToEnd = nil
+}
+
+func solveMaze(maze *Maze, algoToUse string) {
+	if algoToUse == "DFS" {
+		DFS(maze)
+	} else if algoToUse == "AStar" {
+
+		AStar(maze)
+	} else {
+		BFS(maze)
+	}
 }
 
 func canVisit(y int, x int, nodeString string, maze *Maze) bool {
@@ -263,7 +276,7 @@ func DFS(maze *Maze) *Maze {
 		fmt.Printf("Current node is: %s \n", currNodeString)
 		if currNode.x == maze.end.x && currNode.y == maze.end.y {
 			// check end
-			maze.pathToEnd = append(maze.pathToEnd, currNodeString)
+			maze.pathToEnd = append(maze.pathToEnd, currNodeString+"-DFS")
 			fmt.Println("Reached the endnode!")
 			break
 		} else if maze.visitedSet.Contains(currNodeString) {
@@ -292,7 +305,7 @@ func DFS(maze *Maze) *Maze {
 				//fmt.Printf("R - new Node = %d, %d \n", currNode.y, currNode.x+1)
 			}
 			maze.visitedSet.Add(currNodeString)
-			maze.pathToEnd = append(maze.pathToEnd, currNodeString)
+			maze.pathToEnd = append(maze.pathToEnd, currNodeString+"-DFS")
 			count++
 			fmt.Printf("Iteration # %d \n", count)
 		}
@@ -312,7 +325,7 @@ func BFS(maze *Maze) *Maze {
 		fmt.Printf("Current node is: %s \n", currNodeString)
 		if currNode.x == maze.end.x && currNode.y == maze.end.y {
 			// check end
-			maze.pathToEnd = append(maze.pathToEnd, currNodeString)
+			maze.pathToEnd = append(maze.pathToEnd, currNodeString+"-BFS")
 			fmt.Println("Reached the endnode!")
 			break
 		} else if maze.visitedSet.Contains(currNodeString) {
@@ -341,7 +354,7 @@ func BFS(maze *Maze) *Maze {
 				//fmt.Printf("R - new Node = %d, %d \n", currNode.y, currNode.x+1)
 			}
 			maze.visitedSet.Add(currNodeString)
-			maze.pathToEnd = append(maze.pathToEnd, currNodeString)
+			maze.pathToEnd = append(maze.pathToEnd, currNodeString+"-BFS")
 			count++
 			fmt.Printf("Iteration # %d \n", count)
 		}
@@ -377,7 +390,7 @@ func AStar(maze *Maze) *Maze {
 		fmt.Printf("Current node is: %s \n", currNodeString)
 		if currNode.x == maze.end.x && currNode.y == maze.end.y {
 			// check end
-			maze.pathToEnd = append(maze.pathToEnd, currNodeString)
+			maze.pathToEnd = append(maze.pathToEnd, currNodeString+"-AStar")
 			fmt.Println("Reached the endnode!")
 			break
 		} else if maze.visitedSet.Contains(currNodeString) {
@@ -406,7 +419,7 @@ func AStar(maze *Maze) *Maze {
 				//fmt.Printf("R - new Node = %d, %d \n", currNode.y, currNode.x+1)
 			}
 			maze.visitedSet.Add(currNodeString)
-			maze.pathToEnd = append(maze.pathToEnd, currNodeString)
+			maze.pathToEnd = append(maze.pathToEnd, currNodeString+"-AStar")
 			count++
 			fmt.Printf("Iteration # %d \n", count)
 			fmt.Println("In ASTAR")
