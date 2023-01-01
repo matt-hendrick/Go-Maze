@@ -18,21 +18,34 @@ var (
 	mapTemplate = template.Must(template.New("maze").Parse(mapHTML))
 )
 
-type Node struct {
-	x         int
-	y         int
-	obstacle  bool
-	parent    *Node // bottom four attributes are only used for A* atm
-	neighbors []*Node
-	fScore    float64
-	gScore    float64
+type DataToInject struct {
+	BFS   MazeHTMLAndPath
+	DFS   MazeHTMLAndPath
+	AStar MazeHTMLAndPath
 }
 
-func NewNode(y, x int) Node {
-	node := Node{}
-	node.y = y
+type MazeHTMLAndPath struct {
+	HTML template.HTML
+	Path []string
+}
+
+type Node struct {
+	x        int
+	y        int
+	obstacle bool
+	fScore   int // bottom two attributes are only used for A*
+	gScore   int
+}
+
+func (node *Node) Equals(otherNode *Node) bool {
+	return node.x == otherNode.x && node.y == otherNode.y
+}
+
+func (node *Node) InitializeNode(maze *Maze, y int, x int) {
 	node.x = x
-	return node
+	node.y = y
+	node.fScore = math.MaxInt32
+	node.gScore = math.MaxInt32
 }
 
 func (node *Node) ToString() string {
@@ -50,13 +63,6 @@ type Maze struct {
 	pathToEnd    []string
 }
 
-func initializeNode(node *Node, maze *Maze, y int, x int) {
-	node.x = x
-	node.y = y
-	node.fScore = math.Inf(1)
-	node.gScore = math.Inf(1)
-}
-
 func NewMaze(size int) *Maze {
 	var maze Maze
 	maze.matrix = make([][]Node, size)
@@ -72,19 +78,17 @@ func NewMaze(size int) *Maze {
 	maze.start.fScore = 0
 	maze.start.gScore = calculateDistance(&maze.start, &maze.end)
 
-	// TODO: Check if there's a better way of initalizing the 2D array without the duplicate nested loops
 	for iY, row := range maze.matrix {
 		for iX, _ := range row {
-			initializeNode(&maze.matrix[iY][iX], &maze, iY, iX)
-			addObstacles(&maze, iY, iX)
-			// fmt.Printf("Y: %d, X: %d \n", iX, iY)
+			maze.matrix[iY][iX].InitializeNode(&maze, iY, iX)
+			maze.AddObstacles(iY, iX)
 		}
 	}
 
 	return &maze
 }
 
-func addObstacles(maze *Maze, y int, x int) {
+func (maze *Maze) AddObstacles(y int, x int) {
 	// don't put an obstacle on the starting or ending cells
 	if (y == maze.start.y && x == maze.start.x) || (y == maze.end.y && x == maze.end.x) {
 		return
@@ -92,17 +96,6 @@ func addObstacles(maze *Maze, y int, x int) {
 	if rand.Intn(10) < 3 {
 		maze.matrix[y][x].obstacle = true
 	}
-}
-
-type DataToInject struct {
-	BFS   MazeHTMLAndPath
-	DFS   MazeHTMLAndPath
-	AStar MazeHTMLAndPath
-}
-
-type MazeHTMLAndPath struct {
-	HTML template.HTML
-	Path []string
 }
 
 type Set struct {
@@ -160,7 +153,7 @@ func (stack *Stack) Clear() {
 
 func (stack *Stack) Print(endNode *Node) {
 	for idx, cell := range *stack {
-		fmt.Printf("%d #: %s, distance = %f\n", idx, cell.ToString(), calculateDistance(&cell, endNode))
+		fmt.Printf("%d #: %s, distance = %f, fScore = %f, gScore = %f\n", idx, cell.ToString(), calculateDistance(&cell, endNode), cell.fScore, cell.gScore)
 	}
 }
 
@@ -182,7 +175,6 @@ func httpHandler(w http.ResponseWriter, r *http.Request) {
 // gets data to inject into main.html
 func getData() DataToInject {
 	var maze *Maze = NewMaze(40)
-
 	var data DataToInject = getDataForEachAlgoType(maze)
 	return data
 }
@@ -191,40 +183,16 @@ func getDataForEachAlgoType(maze *Maze) DataToInject {
 	algos := [3]string{"DFS", "BFS", "AStar"}
 	var data DataToInject
 
-	for _, algoToUse := range algos {
+	for _, algoType := range algos {
 		clearMazeState(maze)
-		solveMaze(maze, algoToUse)
+		solveMaze(maze, algoType)
 		var mazeHtmlAndPath MazeHTMLAndPath
-
-		for iY, y := range maze.matrix {
-			for iX, _ := range y {
-				// add opening div for row
-				if iX == 0 {
-					mazeHtmlAndPath.HTML += "<div class=row>"
-				}
-
-				// add divs for cells
-				if iY == maze.start.y && iX == maze.start.x {
-					mazeHtmlAndPath.HTML += template.HTML(fmt.Sprintf("<div class='cell' style='background-color:gold' id='%d,%d-%s'></div>", iY, iX, algoToUse))
-				} else if iY == maze.end.y && iX == maze.end.x {
-					mazeHtmlAndPath.HTML += template.HTML(fmt.Sprintf("<div class='cell' style='background-color:red' id='%d,%d-%s'></div>", iY, iX, algoToUse))
-				} else if maze.matrix[iY][iX].obstacle {
-					mazeHtmlAndPath.HTML += template.HTML(fmt.Sprintf("<div class='cell' style='background-color:black' id='%d,%d-%s'></div>", iY, iX, algoToUse))
-				} else {
-					mazeHtmlAndPath.HTML += template.HTML(fmt.Sprintf("<div class='cell' id='%d,%d-%s'></div>", iY, iX, algoToUse))
-				}
-
-				// add closing div for row
-				if iX+1 >= len(y) {
-					mazeHtmlAndPath.HTML += "</div>"
-				}
-			}
-		}
-
+		mazeHtmlAndPath.HTML = generateMazeHTML(algoType, maze)
 		mazeHtmlAndPath.Path = maze.pathToEnd
-		if algoToUse == "DFS" {
+
+		if algoType == "DFS" {
 			data.DFS = mazeHtmlAndPath
-		} else if algoToUse == "BFS" {
+		} else if algoType == "BFS" {
 			data.BFS = mazeHtmlAndPath
 		} else {
 			data.AStar = mazeHtmlAndPath
@@ -243,18 +211,49 @@ func clearMazeState(maze *Maze) {
 	maze.pathToEnd = nil
 }
 
-func solveMaze(maze *Maze, algoToUse string) {
-	if algoToUse == "DFS" {
+func solveMaze(maze *Maze, algoType string) {
+	if algoType == "DFS" {
 		DFS(maze)
-	} else if algoToUse == "AStar" {
-
-		AStar(maze)
-	} else {
+	} else if algoType == "BFS" {
 		BFS(maze)
+	} else {
+		AStar(maze)
 	}
 }
 
+func generateMazeHTML(algoType string, maze *Maze) template.HTML {
+	var html template.HTML
+
+	for iY, y := range maze.matrix {
+		for iX, _ := range y {
+			// add opening div for row
+			if iX == 0 {
+				html += "<div class=row>"
+			}
+
+			// add divs for cells
+			if iY == maze.start.y && iX == maze.start.x {
+				html += template.HTML(fmt.Sprintf("<div class='cell' style='background-color:gold' id='%d,%d-%s'></div>", iY, iX, algoType))
+			} else if iY == maze.end.y && iX == maze.end.x {
+				html += template.HTML(fmt.Sprintf("<div class='cell' style='background-color:red' id='%d,%d-%s'></div>", iY, iX, algoType))
+			} else if maze.matrix[iY][iX].obstacle {
+				html += template.HTML(fmt.Sprintf("<div class='cell' style='background-color:black' id='%d,%d-%s'></div>", iY, iX, algoType))
+			} else {
+				html += template.HTML(fmt.Sprintf("<div class='cell' id='%d,%d-%s'></div>", iY, iX, algoType))
+			}
+
+			// add closing div for row
+			if iX+1 >= len(y) {
+				html += "</div>"
+			}
+		}
+	}
+
+	return html
+}
+
 func canVisit(y int, x int, nodeString string, maze *Maze) bool {
+	// is within bounds
 	if x < 0 || y < 0 || y >= len(maze.matrix) || x >= len(maze.matrix[y]) {
 		return false
 	}
@@ -267,47 +266,43 @@ func canVisit(y int, x int, nodeString string, maze *Maze) bool {
 	return true
 }
 
+func visitCell(y int, x int, currNode *Node, currNodeString string, maze *Maze, algoType string) {
+	if canVisit(y, x, currNodeString, maze) {
+		if algoType == "DFS" {
+			maze.stackToVisit.Push(maze.matrix[y][x])
+		} else if algoType == "BFS" {
+			maze.queueToVisit.PushBack(maze.matrix[y][x])
+		} else {
+			aStarProcessNeighbor(&maze.matrix[y][x], currNode, maze)
+		}
+	}
+}
+
+func visitNeighboringCells(currNode *Node, currNodeString string, maze *Maze, algoType string) {
+	// visit top neighbor
+	visitCell(currNode.y-1, currNode.x, currNode, currNodeString, maze, algoType)
+	// visit left neighbor
+	visitCell(currNode.y, currNode.x-1, currNode, currNodeString, maze, algoType)
+	// visit bottom neighbor
+	visitCell(currNode.y+1, currNode.x, currNode, currNodeString, maze, algoType)
+	// visit right neighbor
+	visitCell(currNode.y, currNode.x+1, currNode, currNodeString, maze, algoType)
+}
+
 func DFS(maze *Maze) *Maze {
 	maze.stackToVisit.Push(maze.start)
-	count := 0
+	var algoType string = "DFS"
 	for len(maze.stackToVisit) > 0 {
 		currNode, _ := maze.stackToVisit.Pop()
 		currNodeString := currNode.ToString()
-		fmt.Printf("Current node is: %s \n", currNodeString)
-		if currNode.x == maze.end.x && currNode.y == maze.end.y {
-			// check end
-			maze.pathToEnd = append(maze.pathToEnd, currNodeString+"-DFS")
-			fmt.Println("Reached the endnode!")
+		if currNode.Equals(&maze.end) {
+			// has reached the end
+			maze.pathToEnd = append(maze.pathToEnd, currNodeString+"-"+algoType)
 			break
-		} else if maze.visitedSet.Contains(currNodeString) {
-			// check visited
-			fmt.Printf(currNodeString + " already visited!")
-		} else {
-			// check neighbors
-			// check top cell
-			if canVisit(currNode.y-1, currNode.x, currNodeString, maze) {
-				maze.stackToVisit.Push(maze.matrix[currNode.y-1][currNode.x])
-				//fmt.Printf("T - new Node = %d, %d \n", currNode.y-1, currNode.x)
-			}
-			// check left cell
-			if canVisit(currNode.y, currNode.x-1, currNodeString, maze) {
-				maze.stackToVisit.Push(maze.matrix[currNode.y][currNode.x-1])
-				//fmt.Printf("L - new Node = %d, %d \n", currNode.y, currNode.x-1)
-			}
-			// check bottom cell
-			if canVisit(currNode.y+1, currNode.x, currNodeString, maze) {
-				maze.stackToVisit.Push(maze.matrix[currNode.y+1][currNode.x])
-				//fmt.Printf("B - new Node = %d, %d \n", currNode.y+1, currNode.x)
-			}
-			// check right cell
-			if canVisit(currNode.y, currNode.x+1, currNodeString, maze) {
-				maze.stackToVisit.Push(maze.matrix[currNode.y][currNode.x+1])
-				//fmt.Printf("R - new Node = %d, %d \n", currNode.y, currNode.x+1)
-			}
+		} else if !maze.visitedSet.Contains(currNodeString) {
+			visitNeighboringCells(&currNode, currNodeString, maze, algoType)
 			maze.visitedSet.Add(currNodeString)
-			maze.pathToEnd = append(maze.pathToEnd, currNodeString+"-DFS")
-			count++
-			fmt.Printf("Iteration # %d \n", count)
+			maze.pathToEnd = append(maze.pathToEnd, currNodeString+"-"+algoType)
 		}
 	}
 	return maze
@@ -316,113 +311,70 @@ func DFS(maze *Maze) *Maze {
 func BFS(maze *Maze) *Maze {
 	maze.queueToVisit = list.New()
 	maze.queueToVisit.PushBack(maze.start)
-	count := 0
+	var algoType string = "BFS"
 	for maze.queueToVisit.Len() > 0 {
 		front := maze.queueToVisit.Front()
 		currNode := front.Value.(Node)
 		maze.queueToVisit.Remove(front)
 		currNodeString := currNode.ToString()
-		fmt.Printf("Current node is: %s \n", currNodeString)
-		if currNode.x == maze.end.x && currNode.y == maze.end.y {
-			// check end
-			maze.pathToEnd = append(maze.pathToEnd, currNodeString+"-BFS")
-			fmt.Println("Reached the endnode!")
+		if currNode.Equals(&maze.end) {
+			// has reached the end
+			maze.pathToEnd = append(maze.pathToEnd, currNodeString+"-"+algoType)
 			break
-		} else if maze.visitedSet.Contains(currNodeString) {
-			// check visited
-			fmt.Printf(currNodeString + " already visited!")
-		} else {
-			// check neighbors
-			// check top cell
-			if canVisit(currNode.y-1, currNode.x, currNodeString, maze) {
-				maze.queueToVisit.PushBack(maze.matrix[currNode.y-1][currNode.x])
-				//fmt.Printf("T - new Node = %d, %d \n", currNode.y-1, currNode.x)
-			}
-			// check left cell
-			if canVisit(currNode.y, currNode.x-1, currNodeString, maze) {
-				maze.queueToVisit.PushBack(maze.matrix[currNode.y][currNode.x-1])
-				//fmt.Printf("L - new Node = %d, %d \n", currNode.y, currNode.x-1)
-			}
-			// check bottom cell
-			if canVisit(currNode.y+1, currNode.x, currNodeString, maze) {
-				maze.queueToVisit.PushBack(maze.matrix[currNode.y+1][currNode.x])
-				//fmt.Printf("B - new Node = %d, %d \n", currNode.y+1, currNode.x)
-			}
-			// check right cell
-			if canVisit(currNode.y, currNode.x+1, currNodeString, maze) {
-				maze.queueToVisit.PushBack(maze.matrix[currNode.y][currNode.x+1])
-				//fmt.Printf("R - new Node = %d, %d \n", currNode.y, currNode.x+1)
-			}
+		} else if !maze.visitedSet.Contains(currNodeString) {
+			visitNeighboringCells(&currNode, currNodeString, maze, algoType)
 			maze.visitedSet.Add(currNodeString)
-			maze.pathToEnd = append(maze.pathToEnd, currNodeString+"-BFS")
-			count++
-			fmt.Printf("Iteration # %d \n", count)
+			maze.pathToEnd = append(maze.pathToEnd, currNodeString+"-"+algoType)
 		}
 	}
 
 	return maze
 }
 
-func calculateDistance(node1 *Node, node2 *Node) float64 {
-	return math.Sqrt(math.Pow(float64(node1.x-node2.x), 2) + math.Pow(float64(node1.y-node2.y), 2))
+func intAbs(num int) int {
+	if num < 0 {
+		return -num
+	}
+	return num
 }
 
-func processNeighbor(neighbor *Node, currNode *Node, maze *Maze) {
-	fScoreThroughCurrentNode := currNode.fScore + calculateDistance(currNode, neighbor)
+// using manhattan distance as only 4 directions of movement are allowed through the grid (no diagonals)
+func calculateDistance(node1 *Node, node2 *Node) int {
+	dx := intAbs(node1.x - node2.x)
+	dy := intAbs(node1.y - node2.y)
+	return dx + dy
+}
+
+// func calculateEuclidianDistance(node1 *Node, node2 *Node) float64 {
+// 	return math.Sqrt(math.Pow(float64(node1.x-node2.x), 2) + math.Pow(float64(node1.y-node2.y), 2))
+// }
+
+func aStarProcessNeighbor(neighbor *Node, currNode *Node, maze *Maze) {
+	fScoreThroughCurrentNode := currNode.fScore + 1
 	if fScoreThroughCurrentNode < neighbor.fScore {
-		neighbor.parent = currNode
 		neighbor.fScore = fScoreThroughCurrentNode
 	}
 	neighbor.gScore = neighbor.fScore + calculateDistance(neighbor, &maze.end)
 	maze.stackToVisit.Push(*neighbor)
 }
 
-// TODO: Improve A* implementation. ATM, gScore, fScore, and parent attributes are doing nothing
 func AStar(maze *Maze) *Maze {
 	maze.stackToVisit.Push(maze.start)
-	count := 0
+	var algoType string = "AStar"
 	for len(maze.stackToVisit) > 0 {
 		sort.Slice(maze.stackToVisit, func(i, j int) bool {
-			return calculateDistance(&maze.stackToVisit[i], &maze.end) > calculateDistance(&maze.stackToVisit[j], &maze.end)
+			return maze.stackToVisit[i].gScore > maze.stackToVisit[j].gScore
 		})
 		currNode, _ := maze.stackToVisit.Pop()
 		currNodeString := currNode.ToString()
-		fmt.Printf("Current node is: %s \n", currNodeString)
-		if currNode.x == maze.end.x && currNode.y == maze.end.y {
-			// check end
-			maze.pathToEnd = append(maze.pathToEnd, currNodeString+"-AStar")
-			fmt.Println("Reached the endnode!")
+		if currNode.Equals(&maze.end) {
+			// has reached end
+			maze.pathToEnd = append(maze.pathToEnd, currNodeString+"-"+algoType)
 			break
-		} else if maze.visitedSet.Contains(currNodeString) {
-			// check visited
-			fmt.Printf(currNodeString + " already visited!")
-		} else {
-			// check neighbors
-			// check top cell
-			if canVisit(currNode.y-1, currNode.x, currNodeString, maze) {
-				processNeighbor(&maze.matrix[currNode.y-1][currNode.x], &currNode, maze)
-				//fmt.Printf("T - new Node = %d, %d \n", currNode.y-1, currNode.x)
-			}
-			// check left cell
-			if canVisit(currNode.y, currNode.x-1, currNodeString, maze) {
-				processNeighbor(&maze.matrix[currNode.y][currNode.x-1], &currNode, maze)
-				//fmt.Printf("L - new Node = %d, %d \n", currNode.y, currNode.x-1)
-			}
-			// check bottom cell
-			if canVisit(currNode.y+1, currNode.x, currNodeString, maze) {
-				processNeighbor(&maze.matrix[currNode.y+1][currNode.x], &currNode, maze)
-				//fmt.Printf("B - new Node = %d, %d \n", currNode.y+1, currNode.x)
-			}
-			// check right cell
-			if canVisit(currNode.y, currNode.x+1, currNodeString, maze) {
-				processNeighbor(&maze.matrix[currNode.y][currNode.x+1], &currNode, maze)
-				//fmt.Printf("R - new Node = %d, %d \n", currNode.y, currNode.x+1)
-			}
+		} else if !maze.visitedSet.Contains(currNodeString) {
+			visitNeighboringCells(&currNode, currNodeString, maze, algoType)
 			maze.visitedSet.Add(currNodeString)
-			maze.pathToEnd = append(maze.pathToEnd, currNodeString+"-AStar")
-			count++
-			fmt.Printf("Iteration # %d \n", count)
-			fmt.Println("In ASTAR")
+			maze.pathToEnd = append(maze.pathToEnd, currNodeString+"-"+algoType)
 		}
 	}
 	return maze
