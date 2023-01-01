@@ -1,6 +1,7 @@
 package main
 
 import (
+	"container/heap"
 	"container/list"
 	_ "embed"
 	"fmt"
@@ -9,7 +10,6 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
-	"sort"
 )
 
 var (
@@ -30,11 +30,12 @@ type MazeHTMLAndPath struct {
 }
 
 type Node struct {
-	x        int
-	y        int
-	obstacle bool
-	fScore   int // bottom two attributes are only used for A*
-	gScore   int
+	x         int
+	y         int
+	obstacle  bool
+	fScore    int // bottom three attributes are only used for A*
+	gScore    int
+	heapIndex int
 }
 
 func (node *Node) Equals(otherNode *Node) bool {
@@ -53,14 +54,14 @@ func (node *Node) ToString() string {
 }
 
 type Maze struct {
-	matrix [][]Node
-	// maybe add a min heap or priority queue for AStar
-	queueToVisit *list.List
-	stackToVisit Stack
-	visitedSet   Set
-	start        Node
-	end          Node
-	pathToEnd    []string
+	matrix               [][]Node
+	queueToVisit         *list.List     // used for BFS
+	stackToVisit         Stack          // used for DFS
+	priorityQueueToVisit *PriorityQueue // used for A*
+	visitedSet           Set
+	start                Node
+	end                  Node
+	pathToEnd            []string
 }
 
 func NewMaze(size int) *Maze {
@@ -153,8 +154,56 @@ func (stack *Stack) Clear() {
 
 func (stack *Stack) Print(endNode *Node) {
 	for idx, cell := range *stack {
-		fmt.Printf("%d #: %s, distance = %f, fScore = %f, gScore = %f\n", idx, cell.ToString(), calculateDistance(&cell, endNode), cell.fScore, cell.gScore)
+		fmt.Printf("%d #: %s, distance = %d, fScore = %d, gScore = %d\n", idx, cell.ToString(), calculateDistance(&cell, endNode), cell.fScore, cell.gScore)
 	}
+}
+
+// PriorityQueue implementation partly based upon standard library documentation example (https://pkg.go.dev/container/heap)
+type PriorityQueue []*Node
+
+func NewPriorityQueue(maze *Maze) *PriorityQueue {
+	var pq PriorityQueue = make(PriorityQueue, 0)
+	pq.Push(&maze.start)
+	heap.Init(&pq)
+	return &pq
+}
+
+func (pq PriorityQueue) Len() int { return len(pq) }
+
+func (pq PriorityQueue) Less(i, j int) bool {
+	return pq[i].gScore > pq[j].gScore
+}
+
+func (pq PriorityQueue) Swap(i, j int) {
+	pq[i], pq[j] = pq[j], pq[i]
+	pq[i].heapIndex = i
+	pq[j].heapIndex = j
+}
+
+func (pq *PriorityQueue) Push(x any) {
+	n := len(*pq)
+	node := x.(*Node)
+	node.heapIndex = n
+	*pq = append(*pq, node)
+}
+
+func (pq *PriorityQueue) Pop() any {
+	old := *pq
+	n := len(old)
+	node := old[n-1]
+	old[n-1] = nil      // avoid memory leak
+	node.heapIndex = -1 // for safety
+	*pq = old[0 : n-1]
+	return node
+}
+
+func (pq *PriorityQueue) Clear() {
+	*pq = (*pq)[:0]
+}
+
+func (pq *PriorityQueue) Update(node *Node) {
+	heap.Push(pq, node)
+	heap.Fix(pq, node.heapIndex)
 }
 
 func main() {
@@ -203,11 +252,14 @@ func getDataForEachAlgoType(maze *Maze) DataToInject {
 }
 
 func clearMazeState(maze *Maze) {
+	maze.visitedSet.Clear()
 	maze.stackToVisit.Clear()
 	if maze.queueToVisit != nil {
 		maze.queueToVisit.Init()
 	}
-	maze.visitedSet.Clear()
+	if maze.priorityQueueToVisit != nil {
+		maze.priorityQueueToVisit.Clear()
+	}
 	maze.pathToEnd = nil
 }
 
@@ -355,24 +407,21 @@ func aStarProcessNeighbor(neighbor *Node, currNode *Node, maze *Maze) {
 		neighbor.fScore = fScoreThroughCurrentNode
 	}
 	neighbor.gScore = neighbor.fScore + calculateDistance(neighbor, &maze.end)
-	maze.stackToVisit.Push(*neighbor)
+	maze.priorityQueueToVisit.Update(neighbor)
 }
 
 func AStar(maze *Maze) *Maze {
-	maze.stackToVisit.Push(maze.start)
+	maze.priorityQueueToVisit = NewPriorityQueue(maze)
 	var algoType string = "AStar"
-	for len(maze.stackToVisit) > 0 {
-		sort.Slice(maze.stackToVisit, func(i, j int) bool {
-			return maze.stackToVisit[i].gScore > maze.stackToVisit[j].gScore
-		})
-		currNode, _ := maze.stackToVisit.Pop()
+	for maze.priorityQueueToVisit.Len() > 0 {
+		currNode := maze.priorityQueueToVisit.Pop().(*Node)
 		currNodeString := currNode.ToString()
 		if currNode.Equals(&maze.end) {
 			// has reached end
 			maze.pathToEnd = append(maze.pathToEnd, currNodeString+"-"+algoType)
 			break
 		} else if !maze.visitedSet.Contains(currNodeString) {
-			visitNeighboringCells(&currNode, currNodeString, maze, algoType)
+			visitNeighboringCells(currNode, currNodeString, maze, algoType)
 			maze.visitedSet.Add(currNodeString)
 			maze.pathToEnd = append(maze.pathToEnd, currNodeString+"-"+algoType)
 		}
